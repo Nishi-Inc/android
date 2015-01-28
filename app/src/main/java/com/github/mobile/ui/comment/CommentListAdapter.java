@@ -15,13 +15,17 @@
  */
 package com.github.mobile.ui.comment;
 
+import android.content.Context;
+import android.support.v7.widget.PopupMenu;
 import android.text.method.LinkMovementMethod;
 import android.view.LayoutInflater;
+import android.view.MenuItem;
 import android.view.View;
+import android.view.View.OnClickListener;
+import android.widget.ImageView;
 
 import com.github.kevinsawicki.wishlist.SingleTypeAdapter;
-import com.github.mobile.R.id;
-import com.github.mobile.R.layout;
+import com.github.mobile.R;
 import com.github.mobile.util.AvatarLoader;
 import com.github.mobile.util.HttpImageGetter;
 import com.github.mobile.util.TimeUtils;
@@ -38,6 +42,22 @@ public class CommentListAdapter extends SingleTypeAdapter<Comment> {
     private final HttpImageGetter imageGetter;
 
     /**
+     * Callback listener to be invoked when user tries to edit a comment.
+     */
+    private final EditCommentListener editCommentListener;
+
+    /**
+     * Callback listener to be invoked when user tries to edit a comment.
+     */
+    private final DeleteCommentListener deleteCommentListener;
+
+    private final boolean isOwner;
+
+    private final String userName;
+
+    private Context context;
+
+    /**
      * Create list adapter
      *
      * @param inflater
@@ -47,11 +67,8 @@ public class CommentListAdapter extends SingleTypeAdapter<Comment> {
      */
     public CommentListAdapter(LayoutInflater inflater, Comment[] elements,
             AvatarLoader avatars, HttpImageGetter imageGetter) {
-        super(inflater, layout.comment_item);
-
-        this.avatars = avatars;
-        this.imageGetter = imageGetter;
-        setItems(elements);
+        this(inflater, elements, avatars, imageGetter, null, null, null, false);
+        this.context = inflater.getContext();
     }
 
     /**
@@ -64,15 +81,88 @@ public class CommentListAdapter extends SingleTypeAdapter<Comment> {
     public CommentListAdapter(LayoutInflater inflater, AvatarLoader avatars,
             HttpImageGetter imageGetter) {
         this(inflater, null, avatars, imageGetter);
+        this.context = inflater.getContext();
+    }
+
+    /**
+     * Create list adapter
+     *
+     * @param inflater
+     * @param elements
+     * @param avatars
+     * @param imageGetter
+     * @param userName
+     * @param isOwner
+     */
+    public CommentListAdapter(LayoutInflater inflater, Comment[] elements,
+            AvatarLoader avatars, HttpImageGetter imageGetter,
+            EditCommentListener editCommentListener, DeleteCommentListener deleteCommentListener, String userName, boolean isOwner) {
+        super(inflater, R.layout.comment_item);
+
+        this.userName = userName;
+        this.isOwner = isOwner;
+        this.context = inflater.getContext();
+        this.avatars = avatars;
+        this.imageGetter = imageGetter;
+        this.editCommentListener = editCommentListener;
+        this.deleteCommentListener = deleteCommentListener;
+        setItems(elements);
     }
 
     @Override
-    protected void update(int position, Comment comment) {
+    protected void update(int position, final Comment comment) {
         imageGetter.bind(textView(0), comment.getBodyHtml(), comment.getId());
         avatars.bind(imageView(3), comment.getUser());
 
         setText(1, comment.getUser().getLogin());
         setText(2, TimeUtils.getRelativeTime(comment.getUpdatedAt()));
+
+        final boolean canEdit = (isOwner || comment.getUser().getLogin().equals(userName))
+            && editCommentListener != null;
+
+        final boolean canDelete = (isOwner || comment.getUser().getLogin().equals(userName))
+            && deleteCommentListener != null;
+
+        final ImageView ivMore = view(4);
+
+        if(!canEdit && !canDelete)
+            ivMore.setVisibility(View.INVISIBLE);
+        else
+            ivMore.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showMorePopup(ivMore, comment, canEdit, canDelete);
+            }
+        });
+    }
+
+    private void showMorePopup(View v, final Comment comment, final boolean canEdit, final boolean canDelete ) {
+        PopupMenu menu = new PopupMenu(context, v);
+        menu.inflate(R.menu.comment_popup);
+
+        menu.getMenu().findItem(R.id.m_edit).setEnabled(canEdit);
+        menu.getMenu().findItem(R.id.m_delete).setEnabled(canDelete);
+
+        menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
+            @Override
+            public boolean onMenuItemClick(MenuItem menuItem) {
+                switch (menuItem.getItemId()) {
+                    case R.id.m_edit:
+                        if (editCommentListener != null) {
+                            editCommentListener.onEditComment(comment);
+                        }
+                        break;
+                    case R.id.m_delete:
+                        if (deleteCommentListener != null) {
+                            deleteCommentListener.onDeleteComment(comment);
+                        }
+                        break;
+                }
+                return false;
+            }
+        });
+
+        menu.show();
     }
 
     @Override
@@ -90,7 +180,7 @@ public class CommentListAdapter extends SingleTypeAdapter<Comment> {
 
     @Override
     protected int[] getChildViewIds() {
-        return new int[] { id.tv_comment_body, id.tv_comment_author,
-                id.tv_comment_date, id.iv_avatar };
+        return new int[] { R.id.tv_comment_body, R.id.tv_comment_author,
+                R.id.tv_comment_date, R.id.iv_avatar, R.id.iv_more };
     }
 }
