@@ -87,12 +87,15 @@ import java.util.Locale;
 
 import org.eclipse.egit.github.core.Comment;
 import org.eclipse.egit.github.core.Issue;
+import org.eclipse.egit.github.core.IssueEvent;
 import org.eclipse.egit.github.core.Label;
 import org.eclipse.egit.github.core.Milestone;
 import org.eclipse.egit.github.core.PullRequest;
 import org.eclipse.egit.github.core.Repository;
 import org.eclipse.egit.github.core.RepositoryId;
 import org.eclipse.egit.github.core.User;
+
+import retrofit.http.HEAD;
 
 /**
  * Fragment to display an issue
@@ -102,6 +105,8 @@ public class IssueFragment extends DialogFragment {
     private int issueNumber;
 
     private List<Comment> comments;
+
+    private List<Object> items;
 
     private RepositoryId repositoryId;
 
@@ -245,11 +250,11 @@ public class IssueFragment extends DialogFragment {
                 .findViewById(R.id.tv_loading);
         loadingText.setText(R.string.loading_comments);
 
-        if (issue == null || (issue.getComments() > 0 && comments == null))
+        if (issue == null || (issue.getComments() > 0 && items == null))
             adapter.addHeader(loadingView);
 
-        if (issue != null && comments != null)
-            updateList(issue, comments);
+        if (issue != null && items != null)
+            updateList(issue, items);
         else {
             if (issue != null)
                 updateHeader(issue);
@@ -344,9 +349,9 @@ public class IssueFragment extends DialogFragment {
         Activity activity = getActivity();
         String userName = AccountUtils.getLogin(activity);
 
-        adapter = new HeaderFooterListAdapter<CommentListAdapter>(list,
+        adapter = new HeaderFooterListAdapter<>(list,
                 new CommentListAdapter(activity.getLayoutInflater(), null, avatars,
-                        commentImageGetter, editCommentListener, deleteCommentListener, userName, isOwner));
+                        commentImageGetter, editCommentListener, deleteCommentListener, userName, isOwner, issue));
         list.setAdapter(adapter);
     }
 
@@ -456,21 +461,47 @@ public class IssueFragment extends DialogFragment {
             @Override
             protected void onSuccess(FullIssue fullIssue) throws Exception {
                 super.onSuccess(fullIssue);
-
                 if (!isUsable())
                     return;
 
                 issue = fullIssue.getIssue();
                 comments = fullIssue;
-                updateList(fullIssue.getIssue(), fullIssue);
+
+                List<IssueEvent> events = (List<IssueEvent>) fullIssue.getEvents();
+                int numEvents = events.size();
+
+                List<Object> allItems = new ArrayList<>();
+
+                int start = 0;
+                for (Comment comment : fullIssue) {
+                    for (int e = start; e < numEvents; e++) {
+                        IssueEvent event = events.get(e);
+                        if (comment.getCreatedAt().after(event.getCreatedAt())) {
+                            allItems.add(event);
+                            start++;
+                        } else {
+                            e = events.size();
+                        }
+                    }
+                    allItems.add(comment);
+                }
+
+                // Adding the last events or if there are no comments
+                for(int e = start; e < events.size(); e++) {
+                    IssueEvent event = events.get(e);
+                    allItems.add(event);
+                }
+
+                items = allItems;
+                updateList(fullIssue.getIssue(), allItems);
             }
         }.execute();
-
     }
 
-    private void updateList(Issue issue, List<Comment> comments) {
-        adapter.getWrappedAdapter().setItems(comments);
+    private void updateList(Issue issue, List<Object> items) {
+        adapter.getWrappedAdapter().setItems(items);
         adapter.removeHeader(loadingView);
+        adapter.getWrappedAdapter().setIssue(issue);
 
         headerView.setVisibility(VISIBLE);
         updateHeader(issue);
@@ -508,7 +539,6 @@ public class IssueFragment extends DialogFragment {
                 @Override
                 protected void onSuccess(Comment comment) throws Exception {
                     super.onSuccess(comment);
-
                     // Update comment list
                     if (comments != null && comment != null) {
                         int position = Collections.binarySearch(comments,
@@ -519,7 +549,7 @@ public class IssueFragment extends DialogFragment {
                                     }
                                 });
                         comments.remove(position);
-                        updateList(issue, comments);
+                        updateList(issue, items);
                     } else
                         refreshIssue();
                 }
@@ -574,10 +604,10 @@ public class IssueFragment extends DialogFragment {
         case COMMENT_CREATE:
             Comment comment = (Comment) data
                     .getSerializableExtra(EXTRA_COMMENT);
-            if (comments != null) {
-                comments.add(comment);
+            if (items != null) {
+                items.add(comment);
                 issue.setComments(issue.getComments() + 1);
-                updateList(issue, comments);
+                updateList(issue, items);
             } else
                 refreshIssue();
             return;
@@ -592,7 +622,7 @@ public class IssueFragment extends DialogFragment {
                 });
                 commentImageGetter.removeFromCache(comment.getId());
                 comments.set(position, comment);
-                updateList(issue, comments);
+                updateList(issue, items);
             } else
                 refreshIssue();
             return;
